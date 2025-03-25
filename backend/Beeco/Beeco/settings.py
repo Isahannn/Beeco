@@ -75,9 +75,14 @@ WSGI_APPLICATION = 'Beeco.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'BeecoDataBase',      # Имя вашей базы данных
+        'USER': 'isahan',             # Ваше имя пользователя PostgreSQL
+        'PASSWORD': '',               # Пароль (если установлен)
+        'HOST': 'localhost',
+        'PORT': '5432',
     }
+
 }
 
 
@@ -121,3 +126,7 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+AUTH_USER_MODEL = 'Beeco.User'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
