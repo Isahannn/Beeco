@@ -41,10 +41,18 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
-
+    'polymorphic',
 ]
-
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'beeco_db',
+        'USER': 'beeco_user',
+        'PASSWORD': 'your_strong_password',
+        'HOST': 'localhost',
+        'PORT': '5432',
+    }
+}
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

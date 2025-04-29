@@ -1,17 +1,18 @@
 import uuid
+from polymorphic.models import PolymorphicModel
 from django.db import models
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from .managers import CustomUserManager
-
+from django.core.validators import MinValueValidator
 
 class User(AbstractUser):
     username = None
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     email = models.EmailField(_('email address'), unique=True, db_index=True)
-
     first_name = models.CharField(_('first name'), max_length=100)
     last_name = models.CharField(_('last name'), max_length=100)
     nickname = models.CharField(_('nickname'), max_length=100, unique=True, db_index=True)
@@ -57,47 +58,6 @@ class User(AbstractUser):
         verbose_name_plural = _('users')
         ordering = ['-date_joined']
 
-
-class Post(models.Model):
-    class Status(models.TextChoices):
-        OPEN = 'open', _('Открытая')
-        CLOSED = 'closed', _('Закрытая')
-        DRAFT = 'draft', _('Черновик')
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(_('title'), max_length=100,blank=True)
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name='posts'
-    )
-    description = models.TextField(_('description'), blank=True)
-    status = models.CharField(
-        _('status'),
-        max_length=20,
-        choices=Status.choices,
-        default=Status.OPEN
-    )
-    created_at = models.DateTimeField(_('created at'), default=timezone.now)
-    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
-    tags = models.ManyToManyField(
-        'Tag',
-        related_name='posts',
-        blank=True,
-        verbose_name=_('tags')
-    )
-
-    def __str__(self):
-        return self.title
-
-    class Meta:
-        verbose_name = _('post')
-        verbose_name_plural = _('posts')
-        ordering = ['-created_at']
-
-
 class Tag(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_('name'), max_length=50, unique=True)
@@ -110,3 +70,131 @@ class Tag(models.Model):
         verbose_name = _('tag')
         verbose_name_plural = _('tags')
         ordering = ['name']
+
+class BasePost(PolymorphicModel):
+    class Status(models.TextChoices):
+        OPEN = 'open', _('Открытая')
+        CLOSED = 'closed', _('Закрытая')
+        DRAFT = 'draft', _('Черновик')
+
+    id = models.UUIDField(default=uuid.uuid4, primary_key=True, editable=False)
+    title = models.CharField(_('title'), max_length=100, blank=True)
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='%(class)s'
+    )
+    description = models.TextField(_('description'), blank=True)
+    created_at = models.DateTimeField(_('created at'), default=timezone.now)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+    tags = models.ManyToManyField(
+        'Tag',
+        related_name='%(class)s',
+        blank=True,
+        verbose_name=_('tags')
+    )
+    class Type(models.TextChoices):
+        POST = 'post', _('post')
+        GROUP = 'group', _('group')
+    type = models.CharField(max_length=10, choices=Type.choices, editable=False)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('base post')
+        verbose_name_plural = _('base posts')
+
+    def __str__(self):
+        return self.title
+
+
+class Post(BasePost):
+    basepost_ptr = models.OneToOneField(
+        BasePost,
+        on_delete=models.CASCADE,
+        parent_link=True,
+        primary_key=True,
+
+    )
+    class Meta:
+        verbose_name = _('post')
+        verbose_name_plural = _('posts')
+
+    def save(self, *args, **kwargs):
+        self.type = BasePost.Type.POST  # Устанавливаем тип автоматически
+        super().save(*args, **kwargs)
+
+class Group(BasePost):
+    max_members = models.PositiveIntegerField(
+        _('max members'),
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(1)],
+        help_text=_("Минимальное значение: 1")
+    )
+    status = models.CharField(
+        _('status'),
+        max_length=20,
+        choices=BasePost.Status.choices,
+        default=BasePost.Status.OPEN
+    )
+
+    class Meta:
+        verbose_name = _('group')
+        verbose_name_plural = _('groups')
+
+    def save(self, *args, **kwargs):
+        self.type = BasePost.Type.GROUP
+        super().save(*args, **kwargs)
+
+    def can_user_join(self, user):
+        """Проверяет, может ли пользователь присоединиться к группе"""
+        if self.status != self.Status.OPEN:
+            return False
+        if self.max_members and self.group_members.count() >= self.max_members:
+            return False
+        return not self.group_members.filter(user=user).exists()
+
+class GroupMember(models.Model):
+    class Role(models.TextChoices):
+        MEMBER = 'member', _('Участник')
+        ADMIN = 'admin', _('Администратор')
+
+    id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False,
+        verbose_name='ID'
+    )
+    group = models.ForeignKey(
+        'Group',
+        on_delete=models.CASCADE,
+        related_name='group_members',
+        verbose_name=_('группа')
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='group_memberships',
+        verbose_name=_('пользователь')
+    )
+    role = models.CharField(
+        max_length=10,
+        choices=Role.choices,
+        default=Role.MEMBER,
+        verbose_name=_('роль')
+    )
+    joined_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name=_('дата присоединения')
+    )
+
+    def __str__(self):
+        return f"{self.user} в {self.group} (роль: {self.role})"
+
+    class Meta:
+        verbose_name = _('участник группы')
+        verbose_name_plural = _('участники групп')
+        unique_together = ('group', 'user')
+        ordering = ['-joined_at']
