@@ -5,8 +5,11 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from .managers import CustomUserManager
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
+from .managers import CustomUserManager, PostManager, GroupMemberManager
 from django.core.validators import MinValueValidator
+
 
 class User(AbstractUser):
     username = None
@@ -26,11 +29,12 @@ class User(AbstractUser):
         help_text=_('Profile picture')
     )
 
-    date_joined = models.DateTimeField(_('date joined'), default=timezone.now)
+    date_joined = models.DateTimeField(_('date joined'), default=timezone.now, db_index=True)
     is_staff = models.BooleanField(
         _('staff status'),
         default=False,
-        help_text=_('Designates whether the user can log into this admin site.')
+        help_text=_('Designates whether the user can log into this admin site.'),
+        db_index=True
     )
     is_active = models.BooleanField(
         _('active'),
@@ -38,7 +42,8 @@ class User(AbstractUser):
         help_text=_(
             'Designates whether this user should be treated as active. '
             'Unselect this instead of deleting accounts.'
-        )
+        ),
+        db_index=True
     )
 
     USERNAME_FIELD = 'email'
@@ -58,10 +63,11 @@ class User(AbstractUser):
         verbose_name_plural = _('users')
         ordering = ['-date_joined']
 
+
 class Tag(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(_('name'), max_length=50, unique=True)
-    created_at = models.DateTimeField(_('created at'), default=timezone.now)
+    created_at = models.DateTimeField(_('created at'), default=timezone.now, db_index=True)
 
     def __str__(self):
         return self.name
@@ -71,11 +77,16 @@ class Tag(models.Model):
         verbose_name_plural = _('tags')
         ordering = ['name']
 
+
 class BasePost(PolymorphicModel):
     class Status(models.TextChoices):
         OPEN = 'open', _('Открытая')
         CLOSED = 'closed', _('Закрытая')
         DRAFT = 'draft', _('Черновик')
+
+    class Type(models.TextChoices):
+        POST = 'post', _('post')
+        GROUP = 'group', _('group')
 
     id = models.UUIDField(default=uuid.uuid4, primary_key=True, editable=False)
     title = models.CharField(_('title'), max_length=100, blank=True)
@@ -87,7 +98,7 @@ class BasePost(PolymorphicModel):
         related_name='%(class)s'
     )
     description = models.TextField(_('description'), blank=True)
-    created_at = models.DateTimeField(_('created at'), default=timezone.now)
+    created_at = models.DateTimeField(_('created at'), default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(_('updated at'), auto_now=True)
     tags = models.ManyToManyField(
         'Tag',
@@ -95,10 +106,9 @@ class BasePost(PolymorphicModel):
         blank=True,
         verbose_name=_('tags')
     )
-    class Type(models.TextChoices):
-        POST = 'post', _('post')
-        GROUP = 'group', _('group')
-    type = models.CharField(max_length=10, choices=Type.choices, editable=False)
+    type = models.CharField(max_length=10, choices=Type.choices, default=Type.POST, null=False, editable=False)
+
+    objects = models.Manager()
 
     class Meta:
         ordering = ['-created_at']
@@ -115,15 +125,18 @@ class Post(BasePost):
         on_delete=models.CASCADE,
         parent_link=True,
         primary_key=True,
-
     )
+
+    objects = PostManager()
+
     class Meta:
         verbose_name = _('post')
         verbose_name_plural = _('posts')
 
     def save(self, *args, **kwargs):
-        self.type = BasePost.Type.POST  # Устанавливаем тип автоматически
+        self.type = BasePost.Type.POST
         super().save(*args, **kwargs)
+
 
 class Group(BasePost):
     max_members = models.PositiveIntegerField(
@@ -140,6 +153,8 @@ class Group(BasePost):
         default=BasePost.Status.OPEN
     )
 
+    objects = GroupMemberManager()
+
     class Meta:
         verbose_name = _('group')
         verbose_name_plural = _('groups')
@@ -149,12 +164,12 @@ class Group(BasePost):
         super().save(*args, **kwargs)
 
     def can_user_join(self, user):
-        """Проверяет, может ли пользователь присоединиться к группе"""
         if self.status != self.Status.OPEN:
             return False
         if self.max_members and self.group_members.count() >= self.max_members:
             return False
         return not self.group_members.filter(user=user).exists()
+
 
 class GroupMember(models.Model):
     class Role(models.TextChoices):
@@ -187,14 +202,100 @@ class GroupMember(models.Model):
     )
     joined_at = models.DateTimeField(
         auto_now_add=True,
-        verbose_name=_('дата присоединения')
+        verbose_name=_('дата присоединения'),
+        db_index=True
     )
-
-    def __str__(self):
-        return f"{self.user} в {self.group} (роль: {self.role})"
 
     class Meta:
         verbose_name = _('участник группы')
         verbose_name_plural = _('участники групп')
-        unique_together = ('group', 'user')
+
         ordering = ['-joined_at']
+
+    def __str__(self):
+        return f"{self.user} в {self.group} (роль: {self.role})"
+
+
+class Comment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='comments')
+    post = models.ForeignKey(BasePost, on_delete=models.CASCADE, related_name='comments')
+    parent_comment = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True, related_name='replies')
+    text = models.TextField(_('text'))
+    created_at = models.DateTimeField(_('created at'), default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(_('updated at'), auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('comment')
+        verbose_name_plural = _('comments')
+
+    def __str__(self):
+        return f"Comment by {self.user} on {self.post}"
+
+
+class Like(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='likes')
+    post = models.ForeignKey(BasePost, on_delete=models.CASCADE, related_name='likes')
+    created_at = models.DateTimeField(_('created at'), default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'post'], name='unique_like')
+        ]
+        verbose_name = _('like')
+        verbose_name_plural = _('likes')
+
+    def __str__(self):
+        return f"Like by {self.user} on {self.post}"
+
+
+class Notification(models.Model):
+    class NotificationType(models.TextChoices):
+        LIKE = 'like', _('Like')
+        COMMENT = 'comment', _('Comment')
+        GROUP_INVITE = 'group_invite', _('Group Invite')
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_notifications')
+    notification_type = models.CharField(max_length=20, choices=NotificationType.choices)
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.UUIDField()
+    content_object = GenericForeignKey('content_type', 'object_id')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(_('created at'), default=timezone.now, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = _('notification')
+        verbose_name_plural = _('notifications')
+
+    def __str__(self):
+        return f"{self.notification_type} notification for {self.recipient}"
+
+
+class Chat(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    participants = models.ManyToManyField(User, related_name='chats')
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-updated_at']
+
+
+class ChatMessage(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chat = models.ForeignKey(Chat, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    is_read = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"Message by {self.sender} in chat {self.chat.id}"
