@@ -43,7 +43,6 @@ class PostManager(PolymorphicManager):
     добавляет методы для получения ленты и популярных постов.
     """
     def get_queryset(self):
-        # Предзагрузка автора и тегов, подсчёт лайков и комментариев
         return super().get_queryset().select_related('user') \
             .prefetch_related('tags') \
             .annotate(
