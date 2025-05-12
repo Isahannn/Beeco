@@ -1,7 +1,6 @@
-from django.db import models
 from .base_post import BasePost
-from .managers import PostManager
-
+from ...managers import PostManager
+from django.utils.translation import gettext_lazy as _
 
 class Post(BasePost):
     objects = PostManager()

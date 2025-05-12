@@ -45,9 +45,13 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'rest_framework',
+    'beeco_app.user',
     'corsheaders',
     'channels',
 ]
+AUTH_USER_MODEL = 'user.User'  # если модель в user/models.py
+# или
+AUTH_USER_MODEL = 'beeco_app.user.User'  # если в beeco_app/user/models.py
 CORS_ALLOW_ALL_ORIGINS = True
 ASGI_APPLICATION = 'Beeco.asgi.application'
 
@@ -74,6 +78,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
 ]
 
 ROOT_URLCONF = 'Beeco.urls'

@@ -1,6 +1,6 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from .base_post import BasePost
+from Beeco.beeco_app.posts import BasePost
 from django.core.validators import MinValueValidator
 
 

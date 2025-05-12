@@ -27,7 +27,7 @@ class BasePost(models.Model):
     created_at = models.DateTimeField(_('Дата создания'), default=timezone.now, db_index=True)
     updated_at = models.DateTimeField(_('Дата обновления'), auto_now=True)
     tags = models.ManyToManyField(
-        'Tag',  # Модель Tag
+        'Tag',
         related_name='%(class)s',
         blank=True,
         verbose_name=_('Теги')
